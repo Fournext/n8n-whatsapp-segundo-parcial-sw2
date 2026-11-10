@@ -18,13 +18,13 @@ services:
     ports:
       - "5678:5678"
     environment:
-      # Para que reciba webhooks públicos y genere bien las URLs:
+      # Configuración de red y URL base para subruta /n8n/
       - N8N_HOST=0.0.0.0
       - N8N_PORT=5678
-      - N8N_PROTOCOL=http
-      # Hacemos la IP dinámica: si no hay PUBLIC_IP en el .env, usa localhost (para tu PC local)
-      - WEBHOOK_URL=http://${PUBLIC_IP:-localhost}:5678
-      # Desactiva la cookie segura porque estás usando HTTP por IP, no HTTPS
+      - N8N_PROTOCOL=https
+      - N8N_PATH=/n8n/
+      - N8N_EDITOR_BASE_URL=https://apexfitness.bratox.me/n8n/
+      - WEBHOOK_URL=https://apexfitness.bratox.me/n8n/
       - N8N_SECURE_COOKIE=false
       - GENERIC_TIMEZONE=America/La_Paz
       - TZ=America/La_Paz
