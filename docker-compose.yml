@@ -1,0 +1,47 @@
+services:
+  api-bridge:
+    image: willxd123/api-bridge-sw2:latest # <-- Imagen ya construida
+    container_name: api-bridge-sw2
+    restart: unless-stopped
+    ports:
+      - "3003:3003"
+    env_file:
+      - .env
+    extra_hosts:
+      # Permite al bridge llegar a la clínica (puerto 3000) en el host
+      - "host.docker.internal:host-gateway"
+
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: n8n-fisioterapia
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      # Para que reciba webhooks públicos y genere bien las URLs:
+      - N8N_HOST=0.0.0.0
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      # Hacemos la IP dinámica: si no hay PUBLIC_IP en el .env, usa localhost (para tu PC local)
+      - WEBHOOK_URL=http://${PUBLIC_IP:-localhost}:5678
+      # Desactiva la cookie segura porque estás usando HTTP por IP, no HTTPS
+      - N8N_SECURE_COOKIE=false
+      - GENERIC_TIMEZONE=America/La_Paz
+      - TZ=America/La_Paz
+      # Comunicación con el Bridge (usa el nombre del contenedor en la misma red)
+      - BRIDGE_URL=http://api-bridge-sw2:3003
+      - BRIDGE_API_KEY=${BRIDGE_API_KEY}
+      # Comunicación con Clínica (usa host.docker.internal porque está en otro docker-compose)
+      - CLINICA_N8N_URL=http://host.docker.internal:3000
+      - N8N_API_KEY=${N8N_API_KEY}
+    volumes:
+      - n8n_data:/home/node/.n8n
+    extra_hosts:
+      # Permite a n8n llegar a clinica corriendo en el host
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - api-bridge
+
+volumes:
+  n8n_data:
+    name: n8n-fisioterapia-data

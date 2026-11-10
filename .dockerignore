@@ -1,0 +1,11 @@
+node_modules
+dist
+.git
+.vscode
+.claude
+npm-debug.log
+*.md
+.prettierrc
+eslint.config.mjs
+workflows
+docker-compose.yml

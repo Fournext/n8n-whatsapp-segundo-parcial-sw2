@@ -1,0 +1,261 @@
+{
+  "name": "Primera Cita por WhatsApp",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "primera-cita",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "a1b2c3d4-0001-4000-a000-000000000001",
+      "name": "Recibir Mensaje de Whapi",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "primera-cita-fisioterapia"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─── Máquina de Estados del Flujo de Primera Cita ────────────────────────────\n\nconst BRIDGE_URL = 'http://host.docker.internal:3003';\nconst BRIDGE_KEY = 'cambia-esta-clave-secreta';\nconst CLINICA_URL = 'http://host.docker.internal:3000';\nconst N8N_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIwNTBmOGU2OC01M2VkLTRkYjktYWU3ZC01ZjY5NzJmMjE0N2EiLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwianRpIjoiYzE3YjViYzgtNzJjNC00ZjZlLTlkNjItMGZjMWI4Y2ExZDY5IiwiaWF0IjoxNzgwMDk0NjYzLCJleHAiOjE3ODI2MTkyMDB9.JWoNBV66ElxEalnyy063IgP-4US2aA_8-nv_PUzM89k';\n\nconst bridgeHeaders = { 'x-bridge-api-key': BRIDGE_KEY };\nconst clinicaHeaders = { 'x-n8n-api-key': N8N_KEY, 'Content-Type': 'application/json' };\n\n// ─── Extraer datos del payload de forma flexible ───────────────────────────\nconst inputJson = $input.first().json;\n// En n8n, el JSON recibido vía POST se guarda dentro de la propiedad .body\nconst body = inputJson.body || inputJson;\n\nlet desde = '';\nlet texto = '';\n\nif (body.desde && body.texto) {\n  // Formato simplificado y pre-procesado del Bridge MS\n  desde = body.desde;\n  texto = body.texto.trim();\n} else {\n  // Formato crudo de Whapi por si acaso\n  const messages = body.messages || [];\n  if (!messages.length) {\n    return [{ json: { ignorar: true } }];\n  }\n  const msg = messages[0];\n  const deMi = msg.from_me ?? msg.fromMe ?? false;\n  if (deMi || msg.type !== 'text') {\n    return [{ json: { ignorar: true } }];\n  }\n  desde = msg.chat_id || msg.chatId || msg.from || '';\n  texto = (msg.text?.body || msg.body || '').trim();\n}\n\nconst telefono = desde.replace('@s.whatsapp.net', '').replace('@c.us', '');\n\nif (!texto || !telefono) {\n  return [{ json: { ignorar: true } }];\n}\n\n// Comando global de reinicio\nconst textoLower = texto.toLowerCase();\nif (['hola', 'inicio', 'nueva cita', 'cancelar', 'reiniciar', 'menu'].includes(textoLower)) {\n  try {\n    await $http.delete(`${BRIDGE_URL}/estado/${telefono}`, { headers: bridgeHeaders });\n  } catch (e) {}\n}\n\n// ─── Obtener estado actual ─────────────────────────────────────────────────\nlet estadoActual = { estado: 'INICIO', datos: {} };\ntry {\n  const resp = await $http.get(`${BRIDGE_URL}/estado/${telefono}`, { headers: bridgeHeaders });\n  if (resp && resp.estado) estadoActual = resp;\n} catch (e) {\n  // 404 = sin conversación activa = INICIO\n}\n\n// Si se envió comando de reinicio, forzar INICIO\nif (['hola', 'inicio', 'nueva cita', 'cancelar', 'reiniciar', 'menu'].includes(textoLower)) {\n  estadoActual = { estado: 'INICIO', datos: {} };\n}\n\nconst estado = estadoActual.estado || 'INICIO';\nconst datos = { ...(estadoActual.datos || {}) };\n\nlet respuesta = '';\nlet nuevoEstado = estado;\nlet nuevosDatos = { ...datos };\nlet emailDatos = null;\nlet limpiarEstado = false;\n\n// ─── Máquina de estados ────────────────────────────────────────────────────\nswitch (estado) {\n  case 'INICIO': {\n    respuesta = `¡Bienvenido al *Centro de Rehabilitación y Fisioterapia*! 🏥\\n\\nPara agendar su primera cita, por favor envíeme su *nombre completo*.\\n_(Ejemplo: Juan Pérez)_`;\n    nuevoEstado = 'NOMBRE';\n    break;\n  }\n\n  case 'NOMBRE': {\n    const partes = texto.trim().split(/\\s+/);\n    nuevosDatos.nombre = partes[0];\n    nuevosDatos.apellido = partes.slice(1).join(' ') || partes[0];\n    respuesta = `Hola *${nuevosDatos.nombre}*! 👋\\n\\nAhora necesito su *número de Cédula de Identidad* (CI):`;\n    nuevoEstado = 'CI';\n    break;\n  }\n\n  case 'CI': {\n    nuevosDatos.ci = texto.toUpperCase().replace(/[^A-Z0-9]/g, '');\n    respuesta = `Perfecto. ¿Cuál es su *número de celular*?\\n_(Puede ser diferente al de este WhatsApp)_`;\n    nuevoEstado = 'TELEFONO';\n    break;\n  }\n\n  case 'TELEFONO': {\n    nuevosDatos.telefonoPaciente = texto.replace(/[^0-9+]/g, '');\n    respuesta = `¿Cuál es su *correo electrónico*?\\n_(Le enviaremos la confirmación de cita)_`;\n    nuevoEstado = 'EMAIL';\n    break;\n  }\n\n  case 'EMAIL': {\n    nuevosDatos.email = texto.toLowerCase().trim();\n    respuesta = `Por último, ¿cuál es el *motivo de su consulta*?\\n_(Ej: Dolor lumbar, rehabilitación de rodilla, lesión deportiva)_`;\n    nuevoEstado = 'MOTIVO';\n    break;\n  }\n\n  case 'MOTIVO': {\n    nuevosDatos.motivo = texto;\n\n    // Registrar/recuperar paciente en Clínica\n    let pacienteId = null;\n    try {\n      const pacResp = await $http.post(\n        `${CLINICA_URL}/n8n/pacientes`,\n        {\n          headers: clinicaHeaders,\n          body: {\n            nombre: nuevosDatos.nombre,\n            apellido: nuevosDatos.apellido,\n            ci: nuevosDatos.ci,\n            telefono: nuevosDatos.telefonoPaciente || telefono,\n          },\n        },\n      );\n      pacienteId = pacResp?.datos?.pacienteId;\n    } catch (e) {\n      respuesta = '⚠️ Hubo un error al registrar sus datos. Por favor escriba *Hola* para intentar nuevamente.';\n      nuevoEstado = 'INICIO';\n      limpiarEstado = true;\n      break;\n    }\n\n    nuevosDatos.pacienteId = pacienteId;\n\n    // Consultar disponibilidad del día siguiente (empleadoId=1 como fisioterapeuta por defecto)\n    const manana = new Date();\n    manana.setDate(manana.getDate() + 1);\n    const fechaBusqueda = manana.toISOString().split('T')[0];\n    nuevosDatos.fechaCita = fechaBusqueda;\n\n    let bloques = [];\n    try {\n      const dispResp = await $http.get(\n        `${CLINICA_URL}/n8n/disponibilidad?empleadoId=1&fecha=${fechaBusqueda}&duracion=60`,\n        { headers: { 'x-n8n-api-key': N8N_KEY } },\n      );\n      bloques = dispResp?.datos?.bloques || [];\n    } catch (e) {}\n\n    if (bloques.length === 0) {\n      respuesta = `Lo sentimos, no hay horarios disponibles para mañana *${fechaBusqueda}*.\\n\\nPor favor contáctenos directamente para encontrar una fecha disponible.\\n📞 *Centro de Fisioterapia*`;\n      nuevoEstado = 'INICIO';\n      limpiarEstado = true;\n    } else {\n      const fmtHora = (iso) =>\n        new Date(iso).toLocaleTimeString('es-BO', { hour: '2-digit', minute: '2-digit', hour12: true });\n      const opciones = bloques\n        .slice(0, 5)\n        .map((b, i) => `  *${i + 1})* ${fmtHora(b.inicio)}`)\n        .join('\\n');\n      nuevosDatos.bloques = bloques.slice(0, 5);\n      respuesta = `✅ Sus datos fueron registrados exitosamente.\\n\\n📅 Horarios disponibles para *mañana ${fechaBusqueda}*:\\n\\n${opciones}\\n\\nResponda con el *número* de su preferencia:`;\n      nuevoEstado = 'HORARIO';\n    }\n    break;\n  }\n\n  case 'HORARIO': {\n    const opcion = parseInt(texto, 10);\n    const bloques = datos.bloques || [];\n\n    if (isNaN(opcion) || opcion < 1 || opcion > bloques.length) {\n      respuesta = `Por favor responda con un número del *1* al *${bloques.length}* para confirmar su horario:`;\n      nuevoEstado = 'HORARIO';\n      break;\n    }\n\n    const bloqueElegido = bloques[opcion - 1];\n    let citaId = null;\n\n    // Agendar cita en Clínica\n    try {\n      const citaResp = await $http.post(\n        `${CLINICA_URL}/n8n/citas`,\n        {\n          headers: clinicaHeaders,\n          body: {\n            pacienteId: datos.pacienteId,\n            empleadoId: 1,\n            fecha_hora: bloqueElegido.inicio,\n            observaciones: datos.motivo\n          }\n        }\n      );\n      citaId = citaResp?.datos?.citaId;\n    } catch (e) {\n      respuesta = '⚠️ Error al agendar la cita. Por favor escriba *Hola* para intentar nuevamente.';\n      nuevoEstado = 'INICIO';\n      limpiarEstado = true;\n      break;\n    }\n\n    // Confirmar cita\n    if (citaId) {\n      try {\n        await $http.patch(\n          `${CLINICA_URL}/n8n/citas/${citaId}/confirmar`,\n          { headers: { 'x-n8n-api-key': N8N_KEY } }\n        );\n      } catch (e) {}\n    }\n\n    const fmtFecha = new Date(bloqueElegido.inicio).toLocaleDateString('es-BO', {\n      weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'\n    });\n    const fmtHora = new Date(bloqueElegido.inicio).toLocaleTimeString('es-BO', {\n      hour: '2-digit', minute: '2-digit', hour12: true\n    });\n\n    respuesta = `🎉 *¡Cita Confirmada!*\\n\\n📅 *Fecha:* ${fmtFecha}\\n🕐 *Hora:* ${fmtHora}\\n🏥 *Lugar:* Centro de Rehabilitación y Fisioterapia\\n\\n_Se envió un email de confirmación a ${datos.email || 'su correo'}._\\n\\nEsperamos verle pronto. Recuerde llegar 10 minutos antes. ✨`;\n\n    if (datos.email) {\n      emailDatos = {\n        para: datos.email,\n        asunto: 'Confirmación de Cita — Centro de Fisioterapia',\n        nombre: `${datos.nombre || ''} ${datos.apellido || ''}`.trim(),\n        fechaHora: `${fmtFecha} a las ${fmtHora}`,\n        motivo: datos.motivo || 'No especificado'\n      };\n    }\n\n    nuevoEstado = 'COMPLETADO';\n    limpiarEstado = true;\n    break;\n  }\n\n  default: {\n    respuesta = 'Escriba *Hola* para agendar una nueva cita. 😊';\n    nuevoEstado = 'INICIO';\n    limpiarEstado = true;\n    break;\n  }\n}\n\n// ─── Actualizar o limpiar estado ───────────────────────────────────────────\nif (limpiarEstado) {\n  try {\n    await $http.delete(`${BRIDGE_URL}/estado/${telefono}`, { headers: bridgeHeaders });\n  } catch (e) {}\n} else {\n  try {\n    await $http.put(\n      `${BRIDGE_URL}/estado/${telefono}`,\n      {\n        headers: { ...bridgeHeaders, 'Content-Type': 'application/json' },\n        body: { estado: nuevoEstado, datos: nuevosDatos }\n      }\n    );\n  } catch (e) {}\n}\n\nreturn [{\n  json: {\n    waDestino: desde,\n    waMensaje: respuesta,\n    emailDatos,\n    ignorar: !respuesta\n  }\n}];\n"
+      },
+      "id": "a1b2c3d4-0002-4000-a000-000000000002",
+      "name": "Orquestar Cita",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-ignorar",
+              "leftValue": "={{ $json.ignorar }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0003-4000-a000-000000000003",
+      "name": "¿Tiene Respuesta?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:3003/whatsapp/enviar",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-bridge-api-key",
+              "value": "cambia-esta-clave-secreta"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "telefono",
+              "value": "={{ $json.waDestino }}"
+            },
+            {
+              "name": "mensaje",
+              "value": "={{ $json.waMensaje }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0004-4000-a000-000000000004",
+      "name": "Enviar WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        900,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-email",
+              "leftValue": "={{ Boolean($('Orquestar Cita').item.json.emailDatos) }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0005-4000-a000-000000000005",
+      "name": "¿Enviar Email?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:3003/email/enviar",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-bridge-api-key",
+              "value": "cambia-esta-clave-secreta"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "para",
+              "value": "={{ $('Orquestar Cita').item.json.emailDatos.para }}"
+            },
+            {
+              "name": "asunto",
+              "value": "={{ $('Orquestar Cita').item.json.emailDatos.asunto }}"
+            },
+            {
+              "name": "nombre",
+              "value": "={{ $('Orquestar Cita').item.json.emailDatos.nombre }}"
+            },
+            {
+              "name": "fechaHora",
+              "value": "={{ $('Orquestar Cita').item.json.emailDatos.fechaHora }}"
+            },
+            {
+              "name": "motivo",
+              "value": "={{ $('Orquestar Cita').item.json.emailDatos.motivo }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0006-4000-a000-000000000006",
+      "name": "Enviar Email Confirmación",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1340,
+        100
+      ]
+    }
+  ],
+  "connections": {
+    "Recibir Mensaje de Whapi": {
+      "main": [
+        [
+          {
+            "node": "Orquestar Cita",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Orquestar Cita": {
+      "main": [
+        [
+          {
+            "node": "¿Tiene Respuesta?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Tiene Respuesta?": {
+      "main": [
+        [
+          {
+            "node": "Enviar WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Enviar WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "¿Enviar Email?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Enviar Email?": {
+      "main": [
+        [
+          {
+            "node": "Enviar Email Confirmación",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "a1b2c3d4-ffff-4000-a000-000000000099",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "erp-fisioterapia-local"
+  },
+  "id": "primera-cita-whatsapp-v1",
+  "tags": [
+    {
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z",
+      "id": "tag-fisioterapia",
+      "name": "ERP-Fisioterapia"
+    }
+  ]
+}

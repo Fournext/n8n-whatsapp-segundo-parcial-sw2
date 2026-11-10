@@ -1,0 +1,450 @@
+{
+  "name": "Titan Gym - Membresias, Vencimientos y Promociones",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "gym-whatsapp",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "gym-node-0001",
+      "name": "Recibir WhatsApp (Whapi)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 260],
+      "webhookId": "gym-whatsapp-webhook"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * *"
+            }
+          ]
+        }
+      },
+      "id": "gym-node-0002",
+      "name": "Cron Diario 8:00 AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 600]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "gym-promociones",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "gym-node-0003",
+      "name": "Webhook Disparar Promocion",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 860],
+      "webhookId": "gym-promociones-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─── Máquina de Estados del Gimnasio (n8n Code Node) ─────────────────────────\n\nconst BRIDGE_URL = 'http://host.docker.internal:3003';\nconst BRIDGE_KEY = 'cambia-esta-clave-secreta';\nconst bridgeHeaders = { 'x-bridge-api-key': BRIDGE_KEY };\n\nconst inputJson = $input.first().json;\nconst body = inputJson.body || inputJson;\n\nlet desde = '';\nlet texto = '';\n\nif (body.desde && body.texto) {\n  desde = body.desde;\n  texto = body.texto.trim();\n} else {\n  const messages = body.messages || [];\n  if (!messages.length) return [{ json: { ignorar: true } }];\n  const msg = messages[0];\n  const deMi = msg.from_me ?? msg.fromMe ?? false;\n  if (deMi || msg.type !== 'text') return [{ json: { ignorar: true } }];\n  desde = msg.chat_id || msg.chatId || msg.from || '';\n  texto = (msg.text?.body || msg.body || '').trim();\n}\n\nconst telefono = desde.replace('@s.whatsapp.net', '').replace('@c.us', '');\nif (!texto || !telefono) return [{ json: { ignorar: true } }];\n\nconst textoLower = texto.toLowerCase();\n\n// Obtener estado actual de conversación\nlet estadoActual = { estado: 'MENU', datos: {} };\ntry {\n  const resp = await $http.get(`${BRIDGE_URL}/estado/${telefono}`, { headers: bridgeHeaders });\n  if (resp && resp.estado) estadoActual = resp;\n} catch (e) {}\n\n// Comandos globales de reinicio\nif (['menu', 'inicio', 'hola', 'buenas', 'reiniciar', 'cancelar'].includes(textoLower)) {\n  try { await $http.delete(`${BRIDGE_URL}/estado/${telefono}`, { headers: bridgeHeaders }); } catch (e) {}\n  estadoActual = { estado: 'MENU', datos: {} };\n}\n\nlet respuesta = '';\nlet nuevoEstado = estadoActual.estado;\nlet nuevosDatos = { ...(estadoActual.datos || {}) };\nlet emailDatos = null;\nlet limpiarEstado = false;\n\n// ─── Lógica de Navegación del Gimnasio ──────────────────────────────────────\nif (textoLower === 'estado' || textoLower === 'mi plan' || textoLower === 'membresia') {\n  respuesta = `📋 *Consulta de Estado de Membresía — Titan Gym*\\nPor favor envíame tu número de *Carnet de Identidad (CI)*:`;\n  nuevoEstado = 'ESPERANDO_CI';\n} else if (textoLower === 'renovar' || textoLower === 'planes') {\n  respuesta = `💳 *Planes de Membresía Titan Gym*\\n\\n*1)* Plan Mensual — *Bs. 250* (30 días)\\n*2)* Plan Trimestral Black — *Bs. 650* (90 días - Ahorras 13%)\\n*3)* Plan Anual VIP — *Bs. 2.200* (365 días + Sauna + 2 Invitados)\\n\\nResponde con el número (*1, 2 o 3*) del plan que deseas renovar:`;\n  nuevoEstado = 'SELECCION_PLAN';\n} else if (textoLower === 'promociones' || textoLower === 'promos') {\n  respuesta = `🔥 *Promociones del Mes en Titan Gym*\\n\\n💥 *2x1 Amigos:* Inscríbete con un amigo y el segundo paga la mitad.\\n⚡ *Renovación Anticipada:* 15% de descuento antes de tu fecha de vencimiento.\\n\\n_Escribe *Renovar* para aprovechar estas promociones o *Menu* para volver._`;\n} else {\n  switch (estadoActual.estado) {\n    case 'MENU': {\n      if (texto === '1') {\n        respuesta = `📋 *Consulta de Membresía*\\nIngresa tu número de *Carnet de Identidad (CI)*:`;\n        nuevoEstado = 'ESPERANDO_CI';\n      } else if (texto === '2') {\n        respuesta = `💳 *Planes de Membresía Titan Gym*\\n\\n*1)* Plan Mensual — *Bs. 250*\\n*2)* Plan Trimestral Black — *Bs. 650*\\n*3)* Plan Anual VIP — *Bs. 2.200*\\n\\nResponde con *1, 2 o 3* para elegir:`;\n        nuevoEstado = 'SELECCION_PLAN';\n      } else if (texto === '3') {\n        respuesta = `🔥 *Promociones Vigentes*\\n• 15% de descuento renovando antes del vencimiento.\\n• Plan Anual con acceso a Sauna y pases gratis.\\n\\nEscribe *Renovar* para elegir tu membresía.`;\n      } else if (texto === '4') {\n        respuesta = `📍 *Titan Gym & Fitness*\\nAv. Principal #1024, Edif. Spartan, Piso 2.\\n⏰ Lun-Vie: 06:00 a 22:00 | Sáb: 08:00 a 18:00.`;\n      } else if (/^\\d{5,9}$/.test(texto)) {\n        // Envió directamente el CI\n        respuesta = `📋 *Estado de Membresía — Titan Gym*\\n\\n👤 *Socio:* Juan Pérez\\n🪪 *CI:* ${texto}\\n🏋️‍♂️ *Plan:* Plan Trimestral Black\\n📅 *Vence:* 31 de Octubre de 2026\\n⏳ *Días Restantes:* 12 días 🟢\\n\\n¿Deseas renovar tu plan?\\n👉 Escribe *Renovar* o escribe *Menu* para volver.`;\n        limpiarEstado = true;\n      } else {\n        respuesta = `🏋️‍♂️ *¡Bienvenido a Titan Gym & Fitness!* 🥊\\n\\n¿En qué podemos ayudarte?\\n*1)* 📋 Consultar Estado de Membresía\\n*2)* 💳 Renovar Membresía\\n*3)* 🔥 Promociones del Mes\\n*4)* ⏰ Horarios y Ubicación\\n\\n_Elige una opción (1-4) o escribe tu *CI*:_`;\n        nuevoEstado = 'MENU';\n      }\n      break;\n    }\n\n    case 'ESPERANDO_CI': {\n      const ci = texto.replace(/[^0-9]/g, '');\n      respuesta = `📋 *Estado de Membresía — Titan Gym*\\n\\n👤 *Socio:* Juan Pérez\\n🪪 *CI:* ${ci || texto}\\n🏋️‍♂️ *Plan Actual:* Plan Trimestral Black\\n📅 *Fecha de Vencimiento:* 31 de Octubre de 2026\\n⏳ *Días Restantes:* 12 días 🟢\\n✨ Acceso a tornos biométricos habilitado.\\n\\n¿Deseas renovar tu membresía?\\n👉 Escribe *Renovar*\\n👉 Escribe *Menu* para volver`;\n      limpiarEstado = true;\n      break;\n    }\n\n    case 'SELECCION_PLAN': {\n      const planes = {\n        '1': { nombre: 'Plan Mensual Estándar', dias: 30, precio: 250 },\n        '2': { nombre: 'Plan Trimestral Black', dias: 90, precio: 650 },\n        '3': { nombre: 'Plan Anual VIP', dias: 365, precio: 2200 }\n      };\n      const planElegido = planes[texto];\n      if (!planElegido) {\n        respuesta = `Por favor responde con una opción válida (*1, 2 o 3*):`;\n      } else {\n        nuevosDatos.plan = planElegido;\n        respuesta = `🧾 *Confirmación de Renovación*\\n\\n🏋️‍♂️ *Plan:* ${planElegido.nombre}\\n💵 *Monto:* Bs. ${planElegido.precio}\\n⏳ *Vigencia:* ${planElegido.dias} días\\n\\nResponde *SI* para confirmar la activación inmediata o *Cancelar*:`;\n        nuevoEstado = 'CONFIRMAR_RENOVACION';\n      }\n      break;\n    }\n\n    case 'CONFIRMAR_RENOVACION': {\n      if (['si', 'sí', 'ok', 'confirmar'].includes(textoLower)) {\n        const p = nuevosDatos.plan || { nombre: 'Plan Mensual', precio: 250, dias: 30 };\n        const hoy = new Date();\n        hoy.setDate(hoy.getDate() + p.dias);\n        const fVenc = hoy.toLocaleDateString('es-BO', { day: '2-digit', month: 'long', year: 'numeric' });\n\n        respuesta = `🎉 *¡Membresía Renovada con Éxito!* 🏋️‍♂️\\n\\n⭐ *Plan:* ${p.nombre}\\n📅 *Nueva Fecha de Vencimiento:* ${fVenc}\\n✅ Acceso por torno y App móvil habilitados.\\n\\n¡A darlo todo en el entrenamiento! 💪🔥`;\n        \n        emailDatos = {\n          para: 'juan.perez@gmail.com',\n          asunto: `Confirmación de Membresía — ${p.nombre}`,\n          nombre: 'Juan Pérez',\n          tipo: 'CONFIRMACION_RENOVACION',\n          plan: p.nombre,\n          fechaVencimiento: fVenc,\n          monto: `Bs. ${p.precio}`,\n          diasRestantes: p.dias\n        };\n        limpiarEstado = true;\n      } else {\n        respuesta = `Renovación cancelada. Escribe *Menu* cuando desees volver.`;\n        limpiarEstado = true;\n      }\n      break;\n    }\n\n    default: {\n      respuesta = `Escribe *Menu* para ver las opciones disponibles en Titan Gym.`;\n      limpiarEstado = true;\n      break;\n    }\n  }\n}\n\n// Actualizar o limpiar estado en Bridge MS\nif (limpiarEstado) {\n  try { await $http.delete(`${BRIDGE_URL}/estado/${telefono}`, { headers: bridgeHeaders }); } catch (e) {}\n} else {\n  try {\n    await $http.put(`${BRIDGE_URL}/estado/${telefono}`, {\n      headers: { ...bridgeHeaders, 'Content-Type': 'application/json' },\n      body: { estado: nuevoEstado, datos: nuevosDatos }\n    });\n  } catch (e) {}\n}\n\nreturn [{\n  json: {\n    waDestino: desde,\n    waMensaje: respuesta,\n    emailDatos,\n    ignorar: !respuesta\n  }\n}];"
+      },
+      "id": "gym-node-0004",
+      "name": "Orquestador Titan Gym",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 260]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-ignorar-gym",
+              "leftValue": "={{ $json.ignorar }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "gym-node-0005",
+      "name": "¿Enviar Respuesta?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [720, 260]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api-bridge-sw2:3003/whatsapp/enviar",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-bridge-api-key",
+              "value": "cambia-esta-clave-secreta"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "telefono",
+              "value": "={{ $json.waDestino }}"
+            },
+            {
+              "name": "texto",
+              "value": "={{ $json.waMensaje }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "gym-node-0006",
+      "name": "Enviar WhatsApp Socio",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [960, 240]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-email-presente",
+              "leftValue": "={{ $json.emailDatos ? true : false }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "gym-node-0007",
+      "name": "¿Enviar Email?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1180, 240]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api-bridge-sw2:3003/email/enviar",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-bridge-api-key",
+              "value": "cambia-esta-clave-secreta"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.emailDatos) }}",
+        "options": {}
+      },
+      "id": "gym-node-0008",
+      "name": "Enviar Email Confirmacion",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1400, 220]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─── Verificar Socios Próximos a Vencer (Notificaciones Proactivas) ─────────\n\n// Lista simulada de socios para el cron diario de vencimientos\nconst sociosPorVencer = [\n  {\n    nombre: 'Carlos Mendoza',\n    telefono: '59178945612@s.whatsapp.net',\n    email: 'carlos.mendoza@gmail.com',\n    plan: 'Plan Mensual Estándar',\n    diasRestantes: 2,\n    fechaVencimiento: '21 de Octubre de 2026'\n  },\n  {\n    nombre: 'Ana Laura Gómez',\n    telefono: '59176543210@s.whatsapp.net',\n    email: 'ana.gomez@gmail.com',\n    plan: 'Plan Trimestral Black',\n    diasRestantes: 0,\n    fechaVencimiento: 'Hoy'\n  }\n];\n\nconst items = sociosPorVencer.map(socio => {\n  const mensajeWA = socio.diasRestantes > 0\n    ? `⚠️ *Titan Gym - Recordatorio de Vencimiento* ⏳\\n\\nHola *${socio.nombre}*, tu membresía *${socio.plan}* vencerá en *${socio.diasRestantes} días* (${socio.fechaVencimiento}).\\n\\nEvita interrupciones en tu acceso al gimnasio.\\n👉 Responde *Renovar* para extender tu plan ahora mismo.`\n    : `🚨 *Titan Gym - Tu membresía vence HOY* 🚨\\n\\nHola *${socio.nombre}*, tu membresía finaliza el día de hoy.\\nA partir de mañana tu acceso por torno se suspenderá temporalmente.\\n\\n👉 Responde *Renovar* para reactivarla de inmediato.`;\n\n  const emailDatos = {\n    para: socio.email,\n    asunto: `⚠️ Aviso de Vencimiento de Membresía — Titan Gym`,\n    nombre: socio.nombre,\n    tipo: 'AVISO_VENCIMIENTO',\n    plan: socio.plan,\n    fechaVencimiento: socio.fechaVencimiento,\n    diasRestantes: socio.diasRestantes,\n    mensaje: `Tu membresía está próxima a vencer. Renueva hoy mismo para seguir entrenando sin pausas.`\n  };\n\n  return {\n    json: {\n      waDestino: socio.telefono,\n      waMensaje: mensajeWA,\n      emailDatos,\n      ignorar: false\n    }\n  };\n});\n\nreturn items;"
+      },
+      "id": "gym-node-0009",
+      "name": "Generar Alertas Vencimiento",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 600]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api-bridge-sw2:3003/whatsapp/enviar",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-bridge-api-key",
+              "value": "cambia-esta-clave-secreta"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "telefono",
+              "value": "={{ $json.waDestino }}"
+            },
+            {
+              "name": "texto",
+              "value": "={{ $json.waMensaje }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "gym-node-0010",
+      "name": "Enviar Alerta WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [720, 600]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api-bridge-sw2:3003/email/enviar",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-bridge-api-key",
+              "value": "cambia-esta-clave-secreta"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.emailDatos) }}",
+        "options": {}
+      },
+      "id": "gym-node-0011",
+      "name": "Enviar Alerta Email",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [960, 600]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─── Broadcast Masivo de Promociones a Socios ───────────────────────────────\n\nconst body = $input.first().json.body || $input.first().json;\nconst promoTitulo = body.titulo || 'Super Descuento de Fin de Mes';\nconst promoTexto = body.descripcion || 'Obtén 20% de descuento en tu renovación anual o 1 mes gratis por cada amigo referido.';\n\nconst listaSocios = [\n  { nombre: 'Juan Pérez', telefono: '59170123456@s.whatsapp.net', email: 'juan.perez@gmail.com' },\n  { nombre: 'Carlos Mendoza', telefono: '59178945612@s.whatsapp.net', email: 'carlos.mendoza@gmail.com' }\n];\n\nreturn listaSocios.map(socio => ({\n  json: {\n    waDestino: socio.telefono,\n    waMensaje: `🔥 *Titan Gym - ¡Promoción Especial para Ti!* 🔥\\n\\nHola *${socio.nombre}*, tenemos una oferta que no puedes dejar pasar:\\n\\n⭐ *${promoTitulo}*\\n${promoTexto}\\n\\n👉 Responde *Renovar* o escríbenos a recepción para hacer válida esta promo. ¡Te esperamos! 💪`,\n    emailDatos: {\n      para: socio.email,\n      asunto: `🔥 ¡Oferta Especial en Titan Gym!`,\n      nombre: socio.nombre,\n      tipo: 'PROMOCION',\n      mensaje: `${promoTitulo}: ${promoTexto}`\n    },\n    ignorar: false\n  }\n}));"
+      },
+      "id": "gym-node-0012",
+      "name": "Formatear Broadcast Promos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 860]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api-bridge-sw2:3003/whatsapp/enviar",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-bridge-api-key",
+              "value": "cambia-esta-clave-secreta"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "telefono",
+              "value": "={{ $json.waDestino }}"
+            },
+            {
+              "name": "texto",
+              "value": "={{ $json.waMensaje }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "gym-node-0013",
+      "name": "Enviar Promo WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [720, 860]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api-bridge-sw2:3003/email/enviar",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-bridge-api-key",
+              "value": "cambia-esta-clave-secreta"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.emailDatos) }}",
+        "options": {}
+      },
+      "id": "gym-node-0014",
+      "name": "Enviar Promo Email",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [960, 860]
+    }
+  ],
+  "connections": {
+    "Recibir WhatsApp (Whapi)": {
+      "main": [
+        [
+          {
+            "node": "Orquestador Titan Gym",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Orquestador Titan Gym": {
+      "main": [
+        [
+          {
+            "node": "¿Enviar Respuesta?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Enviar Respuesta?": {
+      "main": [
+        [
+          {
+            "node": "Enviar WhatsApp Socio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar WhatsApp Socio": {
+      "main": [
+        [
+          {
+            "node": "¿Enviar Email?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Enviar Email?": {
+      "main": [
+        [
+          {
+            "node": "Enviar Email Confirmacion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cron Diario 8:00 AM": {
+      "main": [
+        [
+          {
+            "node": "Generar Alertas Vencimiento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generar Alertas Vencimiento": {
+      "main": [
+        [
+          {
+            "node": "Enviar Alerta WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar Alerta WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "Enviar Alerta Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook Disparar Promocion": {
+      "main": [
+        [
+          {
+            "node": "Formatear Broadcast Promos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formatear Broadcast Promos": {
+      "main": [
+        [
+          {
+            "node": "Enviar Promo WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar Promo WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "Enviar Promo Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
