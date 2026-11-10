@@ -98,6 +98,8 @@ Copiar `clinica-segundo-parcial-sw2/.env` y extraer:
 | `SMTP_PASS` | App password de Gmail |
 | `BRIDGE_API_KEY` | Clave inventada (debe coincidir con `N8N_API_KEY` del docker-compose) |
 | `N8N_WEBHOOK_URL` | URL del webhook de n8n (paso 1) |
+| `TELEGRAM_BOT_TOKEN` | Token del Bot de Telegram (obtenido de @BotFather) |
+| `TELEGRAM_DEFAULT_CHAT_ID` | (Opcional) Chat ID de Telegram para pruebas y alertas |
 
 ---
 
@@ -105,12 +107,29 @@ Copiar `clinica-segundo-parcial-sw2/.env` y extraer:
 
 | Método | Ruta | Auth | Llamado por | Descripción |
 |---|---|---|---|---|
-| `POST` | `/webhook/whatsapp` | — | Whapi | Recibe eventos de WhatsApp, reenvía a n8n |
-| `POST` | `/whatsapp/enviar` | `x-bridge-api-key` | n8n | Envía mensaje de WhatsApp al paciente via Whapi |
+| `POST` | `/webhook/whatsapp` | — | Whapi | Recibe eventos de WhatsApp, procesa y reenvía a n8n |
+| `POST` | `/webhook/telegram` | — | Telegram Bot API | Recibe eventos de Telegram, procesa y reenvía a n8n |
+| `POST` | `/whatsapp/enviar` | `x-bridge-api-key` | n8n / Bot | Envía mensaje de WhatsApp al socio via Whapi |
+| `POST` | `/telegram/enviar` | `x-bridge-api-key` | n8n / Bot | Envía mensaje de Telegram al socio via Telegram Bot API |
 | `POST` | `/email/enviar` | `x-bridge-api-key` | n8n | Envía email de confirmación via SMTP |
 | `GET` | `/estado/:telefono` | `x-bridge-api-key` | n8n | Obtiene estado de la conversación |
 | `PUT` | `/estado/:telefono` | `x-bridge-api-key` | n8n | Actualiza estado de la conversación |
 | `DELETE` | `/estado/:telefono` | `x-bridge-api-key` | n8n | Limpia el estado al completar o cancelar |
+
+---
+
+## Integración con Telegram (Bot API)
+
+1. En Telegram, busca a **@BotFather** y crea un nuevo bot con `/newbot`.
+2. Guarda el **Token HTTP API** que te entrega y pégalo en tu archivo `.env` en `TELEGRAM_BOT_TOKEN`.
+3. Para vincular el Webhook de Telegram con tu URL de ngrok:
+   ```powershell
+   curl.exe -X POST "https://api.telegram.org/bot<TU_TELEGRAM_BOT_TOKEN>/setWebhook?url=https://<TU_DOMINIO_NGROK>/webhook/telegram"
+   ```
+4. En n8n, el workflow `gimnasio-membresias-whatsapp.json` ya incluye soporte dual:
+   - Recibe tanto de WhatsApp (`/webhook/gym-whatsapp`) como de Telegram (`/webhook/gym-telegram`).
+   - El nodo **Orquestador Titan Gym** detecta automáticamente el canal (`whatsapp` o `telegram`).
+   - Las alertas de vencimiento y promociones se envían tanto a WhatsApp como a Telegram.
 
 ---
 

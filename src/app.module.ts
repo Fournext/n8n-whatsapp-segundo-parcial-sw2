@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { WebhookModule } from './webhook/webhook.module';
 import { WhatsappModule } from './whatsapp/whatsapp.module';
+import { TelegramModule } from './telegram/telegram.module';
 import { EmailModule } from './email/email.module';
 import { EstadoModule } from './estado/estado.module';
 import { ChatbotModule } from './chatbot/chatbot.module';
@@ -12,6 +13,7 @@ import { GraphqlModule } from './graphql/graphql.module';
     ConfigModule.forRoot({ isGlobal: true }),
     WebhookModule,
     WhatsappModule,
+    TelegramModule,
     EmailModule,
     EstadoModule,
     ChatbotModule,

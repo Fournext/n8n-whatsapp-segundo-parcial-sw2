@@ -25,4 +25,18 @@ export class WebhookController {
     await this.webhookService.procesarEvento(payload);
     return { status: 'ok' };
   }
+
+  /**
+   * Recibe eventos y mensajes entrantes de Telegram Bot API.
+   *
+   * POST /webhook/telegram
+   */
+  @Post('telegram')
+  @HttpCode(200)
+  async recibirTelegram(
+    @Body() payload: any,
+  ): Promise<{ status: string }> {
+    await this.webhookService.procesarEventoTelegram(payload);
+    return { status: 'ok' };
+  }
 }
