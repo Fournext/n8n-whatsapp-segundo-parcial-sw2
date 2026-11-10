@@ -166,26 +166,17 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "http://api-bridge-sw2:3003/telegram/enviar",
+        "url": "https://api.telegram.org/bot9251530192:AAETSpZXCv27dVMZ8svcRudW0AoxIDf5GUw/sendMessage",
         "authentication": "none",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "x-bridge-api-key",
-              "value": "cambia-esta-clave-secreta"
-            }
-          ]
-        },
         "sendBody": true,
         "bodyParameters": {
           "parameters": [
             {
-              "name": "chatId",
+              "name": "chat_id",
               "value": "={{ $json.telegramChatId }}"
             },
             {
-              "name": "mensaje",
+              "name": "text",
               "value": "={{ $json.telegramMensaje }}"
             }
           ]
@@ -300,26 +291,17 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "http://api-bridge-sw2:3003/telegram/enviar",
+        "url": "https://api.telegram.org/bot9251530192:AAETSpZXCv27dVMZ8svcRudW0AoxIDf5GUw/sendMessage",
         "authentication": "none",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "x-bridge-api-key",
-              "value": "cambia-esta-clave-secreta"
-            }
-          ]
-        },
         "sendBody": true,
         "bodyParameters": {
           "parameters": [
             {
-              "name": "chatId",
+              "name": "chat_id",
               "value": "={{ $json.telegramChatId }}"
             },
             {
-              "name": "mensaje",
+              "name": "text",
               "value": "={{ $json.telegramMensaje }}"
             }
           ]
@@ -405,26 +387,17 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "http://api-bridge-sw2:3003/telegram/enviar",
+        "url": "https://api.telegram.org/bot9251530192:AAETSpZXCv27dVMZ8svcRudW0AoxIDf5GUw/sendMessage",
         "authentication": "none",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "x-bridge-api-key",
-              "value": "cambia-esta-clave-secreta"
-            }
-          ]
-        },
         "sendBody": true,
         "bodyParameters": {
           "parameters": [
             {
-              "name": "chatId",
+              "name": "chat_id",
               "value": "={{ $json.telegramChatId }}"
             },
             {
-              "name": "mensaje",
+              "name": "text",
               "value": "={{ $json.telegramMensaje }}"
             }
           ]
