@@ -7,6 +7,8 @@ services:
       - "3003:3003"
     env_file:
       - .env
+    environment:
+      - PORT=3003
     extra_hosts:
       # Permite al bridge llegar a la clínica (puerto 3000) en el host
       - "host.docker.internal:host-gateway"
